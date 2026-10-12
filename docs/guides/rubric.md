@@ -48,6 +48,7 @@ The text can span lines; quotes inside it are kept as typed. `@file` is relative
 - One task gets at most 3 passes. Each message you send starts a fresh grading with 3 passes; the grader reads the conversation from the message that started the task.
 - Background work: when the turn left sub-agent tasks or `run_in_background` processes of this thread still running, grading is deferred (`Acceptance check deferred: ...`) and runs in the turn their completion starts, on the original task. A process that never exits holds grading back only until your next message. A sub-agent task holds back only the grading of the task that started it: one that was already running when that task's first message was sent is not waited for. A task that never ends keeps its grading waiting; `/rubric clear` drops it.
 - The status bar shows `rubric: on`, `rubric: next` or `rubric: on+next`.
+- A thread's [goal](goal.md) keeps its criteria in the place of the `/rubric set` checklist, so `/rubric set` and `/rubric clear` cancel the goal (the command says so).
 - Approvals work as usual; revisions can bring more of them, within the existing per-turn limits.
 - Not graded: single-shot runs without `--rubric`, the WebUI, `EvoSci serve`, and a notification turn for a thread other than the current one. `/rubric` is refused in channel sessions and when the session executes its runs on the `langgraph_server` gateway.
 
