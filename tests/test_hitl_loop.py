@@ -30,14 +30,8 @@ from EvoScientist.middleware import events as mw_events
 from EvoScientist.stream import display as display_mod
 from tests.fakes import FakeCheckpointAgent, FakeGraphGateway
 from tests.fakes import StubChannel as _StubChannel
-
-
-def _interrupt_event(n: int) -> dict:
-    return {
-        "type": "interrupt",
-        "interrupt_id": f"i{n}",
-        "action_requests": [{"name": "execute", "args": {"command": f"echo step-{n}"}}],
-    }
+from tests.fakes import attended_config as _attended_config
+from tests.fakes import interrupt_event as _interrupt_event
 
 
 class TestRichCliHitlRoundBudget:
@@ -462,15 +456,6 @@ def _interrupts_then_done(interrupts: int):
         yield {"type": "done", "content": "finished"}
 
     return _fake_stream
-
-
-def _attended_config(monkeypatch):
-    monkeypatch.setattr(
-        "EvoScientist.EvoScientist._ensure_config",
-        lambda: SimpleNamespace(
-            auto_approve=False, dangerous_mode=False, shell_allow_list=""
-        ),
-    )
 
 
 class TestRichCliSessionGrantReachesTheGraph:

@@ -577,6 +577,11 @@ ParkedCloseReason = Literal["round_limit", "rejected", "unanswered"]
 HITL_ROUND_LIMIT_REJECT_MESSAGE = "approval round limit reached"
 
 _NO_RETRY = "Do not retry this tool call unless the user explicitly requests it."
+_MAY_HAVE_RUN = (
+    "Anything it had already done may have taken effect or may still be "
+    "finishing; check the current state instead of re-running it unless the "
+    "user asks."
+)
 
 # The user was asked about the call and it did not run. The round-limit
 # sentence predates the others and is kept as it was.
@@ -684,9 +689,7 @@ def abandoned_tool_messages(
         else:
             content = (
                 f"The tool call for `{name}` with id {call_id} did not finish "
-                f"({_NOT_FINISHED[reason]}). Anything it had already done may "
-                "have taken effect or may still be finishing; check the current "
-                "state instead of re-running it unless the user asks."
+                f"({_NOT_FINISHED[reason]}). {_MAY_HAVE_RUN}"
             )
         results.append(
             ToolMessage(

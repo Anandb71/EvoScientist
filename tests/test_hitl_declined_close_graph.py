@@ -16,8 +16,7 @@ from EvoScientist.gateway.local import LocalGraphGateway
 from EvoScientist.gateway.types import GraphTarget
 from EvoScientist.paths import Workspace
 from EvoScientist.stream.events import stream_agent_events
-
-NO_RETRY = "Do not retry this tool call unless the user explicitly requests it."
+from tests.fakes import close_result
 
 
 class _Scripted(BaseChatModel):
@@ -85,6 +84,11 @@ def _results(state) -> dict[str, str]:
     }
 
 
+def _facts(state) -> dict[str, tuple[str, str, bool]]:
+    """Per call: what its result says (``close_result``)."""
+    return {call: close_result(text) for call, text in _results(state).items()}
+
+
 def _files(tmp_path) -> list[str]:
     return sorted(path.name for path in tmp_path.glob("*.txt"))
 
@@ -110,10 +114,7 @@ async def test_a_declined_command_is_closed_and_the_next_turn_starts_clean(tmp_p
     state = await _state(agent)
     assert state.next == ()
     assert not any(task.interrupts for task in state.tasks)
-    assert _results(state) == {
-        "c1": "User rejected the tool call for `execute` with id c1. The tool "
-        f"was not executed. {NO_RETRY}"
-    }
+    assert _facts(state) == {"c1": ("asked", "rejected", True)}
 
     second = await _turn(agent, "what happened?")
     assert [e["type"] for e in second if e["type"] == "tool_call"] == []
@@ -138,15 +139,10 @@ async def test_a_batch_tells_the_asked_call_from_its_ungated_sibling(tmp_path):
     await _turn(agent, "go")
     await _close(agent, "unanswered")
 
-    results = _results(await _state(agent))
-    assert results["c1"] == (
-        "The approval request for the tool call `execute` with id c1 was left "
-        f"unanswered. The tool was not executed. {NO_RETRY}"
-    )
-    assert results["w1"] == (
-        "The tool call for `write_file` with id w1 was not executed: the turn "
-        "ended with an approval request or question left unanswered."
-    )
+    assert _facts(await _state(agent)) == {
+        "c1": ("asked", "unanswered", True),
+        "w1": ("not executed", "unanswered", False),
+    }
     assert _files(tmp_path) == []
 
 
@@ -187,12 +183,7 @@ async def test_a_declined_command_inside_a_sub_agent_leaves_the_task_unfinished(
 
     state = await _state(agent)
     assert state.next == ()
-    assert _results(state) == {
-        "t1": "The tool call for `task` with id t1 did not finish (the user "
-        "rejected an approval request). Anything it had already done may have "
-        "taken effect or may still be finishing; check the current state "
-        "instead of re-running it unless the user asks."
-    }
+    assert _facts(state) == {"t1": ("did not finish", "rejected", False)}
     assert _files(tmp_path) == ["done.txt"]
 
 
@@ -217,12 +208,9 @@ async def test_a_question_nobody_answered_is_not_called_a_rejection(tmp_path):
 
     await _close(agent, "unanswered")
 
-    (text,) = _results(await _state(agent)).values()
-    assert text.startswith(
-        "The tool call for `ask_user` with id q1 did not finish (an approval "
-        "request or question was left unanswered)."
-    )
-    assert "rejected" not in text
+    assert _facts(await _state(agent)) == {
+        "q1": ("did not finish", "unanswered", False)
+    }
 
 
 async def test_closing_leaves_a_one_shot_checklist_as_an_interrupted_turn_does(
@@ -307,12 +295,8 @@ async def test_a_sibling_sub_agent_that_finished_keeps_its_result(tmp_path):
     assert state.next == ()
     results = sorted(_results(state).values())
     assert len(results) == 2
-    assert any(text == "sibling done" for text in results)
-    assert any(
-        text.startswith("The tool call for `task` with id ")
-        and "did not finish (the user rejected an approval request)" in text
-        for text in results
-    )
+    assert "sibling done" in results
+    assert ("did not finish", "rejected", False) in map(close_result, results)
     # Nothing is written after the close.
     assert (await _state(agent)).values["messages"] == state.values["messages"]
     assert _files(tmp_path) == ["sibling.txt"]
