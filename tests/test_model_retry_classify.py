@@ -394,10 +394,9 @@ def test_classification_on_real_sdk_exceptions(label, expected, make, how):
     assert is_transient(exc) is expected, f"{label}: {type(exc).__name__}: {exc}"
 
 
-def test_fallback_context_is_not_followed():
-    # The fallback chain raises the last model's error inside the except block
-    # of the primary's: the primary's transient ConnectError is reachable only
-    # through __context__, and must not make the final failure transient.
+def test_an_implicit_context_is_not_followed():
+    # An implicit __context__ is not evidence: a chain's earlier failures
+    # count only when the chain lists them itself.
     try:
         try:
             raise httpx.ConnectError("refused")

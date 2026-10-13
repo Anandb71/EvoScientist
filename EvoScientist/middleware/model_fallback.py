@@ -303,6 +303,7 @@ async def _try_fallbacks(
     # actually saw fail.
     last_exc = primary_exc
     last_failing_request = request
+    failures = [(request, primary_exc)]
 
     for model_name, provider in get_fallback_chain():
         events.emit_fallback_notice(
@@ -310,6 +311,9 @@ async def _try_fallbacks(
             f"{type(last_exc).__name__}: {last_exc}",
             "yellow",
         )
+        # No request until the entry's model exists: a failure to build it is
+        # the entry's own, not the previous model's.
+        fb_request = None
         try:
             fallback_model = get_chat_model(model=model_name, provider=provider)
             fb_request = request.override(model=fallback_model)
@@ -331,6 +335,7 @@ async def _try_fallbacks(
                 _raise_normalized(fb_request, fb_exc)
             last_exc = fb_exc
             last_failing_request = fb_request
+            failures.append((fb_request, fb_exc))
             events.emit_fallback_notice(
                 f"  x {model_name} also failed: {type(fb_exc).__name__}: {fb_exc}",
                 "red",
@@ -346,7 +351,7 @@ async def _try_fallbacks(
     events.emit_fallback_notice(
         "  All fallbacks exhausted -- re-raising last error", "red"
     )
-    _raise_normalized(last_failing_request, last_exc)
+    _raise_normalized(last_failing_request, last_exc, failures)
 
 
 def _try_fallbacks_sync(
@@ -373,6 +378,7 @@ def _try_fallbacks_sync(
 
     last_exc = primary_exc
     last_failing_request = request
+    failures = [(request, primary_exc)]
 
     for model_name, provider in get_fallback_chain():
         events.emit_fallback_notice(
@@ -380,6 +386,9 @@ def _try_fallbacks_sync(
             f"{type(last_exc).__name__}: {last_exc}",
             "yellow",
         )
+        # No request until the entry's model exists: a failure to build it is
+        # the entry's own, not the previous model's.
+        fb_request = None
         try:
             fallback_model = get_chat_model(model=model_name, provider=provider)
             fb_request = request.override(model=fallback_model)
@@ -401,6 +410,7 @@ def _try_fallbacks_sync(
                 _raise_normalized(fb_request, fb_exc)
             last_exc = fb_exc
             last_failing_request = fb_request
+            failures.append((fb_request, fb_exc))
             events.emit_fallback_notice(
                 f"  x {model_name} also failed: {type(fb_exc).__name__}: {fb_exc}",
                 "red",
@@ -416,21 +426,57 @@ def _try_fallbacks_sync(
     events.emit_fallback_notice(
         "  All fallbacks exhausted -- re-raising last error", "red"
     )
-    _raise_normalized(last_failing_request, last_exc)
+    _raise_normalized(last_failing_request, last_exc, failures)
 
 
-def _raise_normalized(request: ModelRequest, exc: Exception) -> None:
+def _attributed(request: ModelRequest | None, exc: Exception) -> Exception:
+    """*exc* as the outer layers see a failure: normalized against the model that raised it."""
+    from .error_normalization import _normalize
+
+    normalized = _normalize(request, exc)
+    if normalized is None:
+        return exc
+    normalized.__cause__ = exc
+    return normalized
+
+
+def chain_failures(exc: BaseException) -> tuple[BaseException, ...]:
+    """Every model's failure when *exc* ended an exhausted chain, primary first; else empty.
+
+    The list rides on the error the chain raised, which an outer layer may have wrapped.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        failures = getattr(current, "chain_failures", None)
+        if failures:
+            return failures
+        seen.add(id(current))
+        current = current.__cause__
+    return ()
+
+
+def _raise_normalized(
+    request: ModelRequest | None,
+    exc: Exception,
+    failures: list[tuple[ModelRequest | None, Exception]] | None = None,
+) -> None:
     """Wrap *exc* in a ``ProviderStreamError`` attributed to
     ``request.model`` and raise, so the outer chain sees the failure
     tagged with the model that actually raised.
 
     Falls back to a plain ``raise`` when the model isn't from a
-    recognized provider (``_normalize`` returns None) — nothing useful
-    to add.
+    recognized provider (``_normalize`` returns None) or the entry had no
+    model at all — nothing useful to add. *failures* (each model of an
+    exhausted chain) travel on the raised error for the retry layer, which
+    judges each model on its own.
     """
     from .error_normalization import _normalize
 
     normalized = _normalize(request, exc)
+    raised = normalized if normalized is not None else exc
+    if failures:
+        raised.chain_failures = tuple(_attributed(r, e) for r, e in failures)
     if normalized is not None:
         raise normalized from exc
     raise exc

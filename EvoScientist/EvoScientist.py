@@ -915,6 +915,8 @@ def _model_retry_middleware(
         if tier_unattended
         else cfg.model_retry_wait_seconds
     )
+    # The config puts a malformed value back to its default itself; this only
+    # meets an object built some other way, where both readers agree on no retry.
     try:
         budget = max(0, int(budget))
     except (TypeError, ValueError, OverflowError):
