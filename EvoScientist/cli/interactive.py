@@ -1459,7 +1459,7 @@ def cmd_interactive(
                         console.print(
                             Text(
                                 f"  Update available: v{latest} (current: v{current}).\n"
-                                "  Run: uv tool upgrade EvoScientist",
+                                "  Run: EvoSci update",
                                 style="yellow",
                             )
                         )

@@ -81,7 +81,8 @@ EvoScientist first; on Windows the script stops and names the EvoScientist
 processes that still run, because a running process keeps the files locked.
 
 A script install pins the exact version, so `uv tool upgrade EvoScientist`
-reports "Nothing to upgrade". Update by running the command again.
+reports "Nothing to upgrade". Update with `EvoSci update`, which also keeps
+the extras and added packages, or by running the command again.
 
 ## Uninstalling
 
