@@ -116,18 +116,24 @@ class RubricCommand(Command):
     async def _show(self, ctx: CommandContext, runtime: ChannelRuntime) -> None:
         pending = runtime.rubric.changes_for(ctx.thread_id)
         values = None
+        unreadable = "Agent not loaded yet"
         if ctx.agent is not None and ctx.graph_gateway is not None:
             from ...gateway import GraphTarget
 
             target = GraphTarget(local_graph=ctx.agent, **ctx.dirs.metadata())
             try:
-                values = await ctx.graph_gateway.get_state_values(target, ctx.thread_id)
+                # A thread with no state yet reads as empty, not as unreadable.
+                values = (
+                    await ctx.graph_gateway.get_state_values(target, ctx.thread_id)
+                    or {}
+                )
             except Exception:
+                unreadable = "Thread state could not be read"
                 logger.debug("/rubric show: thread state unavailable", exc_info=True)
         if values is None:
             ctx.ui.append_system(
-                "Agent not loaded yet; showing only the changes waiting for your "
-                "next message.",
+                f"{unreadable}; showing only the changes waiting for your next "
+                "message.",
                 style="dim",
             )
         else:

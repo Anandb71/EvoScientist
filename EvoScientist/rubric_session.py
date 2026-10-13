@@ -9,10 +9,13 @@ thread reports that number.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -99,3 +102,67 @@ def rubric_badge(
     if next_:
         return "next"
     return None
+
+
+# -- shared by the interactive CLI and the TUI ---------------------------------
+
+
+def runs_in_process(graph_gateway: Any) -> bool:
+    """Whether a session's runs execute in-process (the local gateway)."""
+    from .gateway.server import LangGraphServerGateway
+
+    execute_gateway = getattr(graph_gateway, "execute_gateway", graph_gateway)
+    return not isinstance(execute_gateway, LangGraphServerGateway)
+
+
+def thread_run_extra(
+    session: RubricSession,
+    graph_gateway: Any,
+    *,
+    thread_id: str | None,
+    current_thread_id: str | None,
+    mode: str | None,
+) -> dict[str, Any] | None:
+    """The run marker and pending operations, for the session's own thread only.
+
+    A notifier turn for another thread runs with the current thread's
+    workspace, and a run on the server gateway is not graded at all.
+    """
+    if (
+        not mode
+        or thread_id is None
+        or thread_id != current_thread_id
+        or not runs_in_process(graph_gateway)
+    ):
+        return None
+    return rubric_configurable_extra(session, thread_id, mode)
+
+
+async def acknowledge_applied(
+    session: RubricSession,
+    badges: dict[str, str | None],
+    graph_gateway: Any,
+    *,
+    agent: Any,
+    dirs: Any,
+    thread_id: str | None,
+) -> None:
+    """Drop operations the thread applied; refresh its status-bar badge in *badges*."""
+    if not thread_id:
+        return
+    # Without a readable state keep what this thread's badge last showed.
+    values: dict[str, Any] = values_for_badge(badges.get(thread_id))
+    if agent is not None:
+        from .gateway import GraphTarget
+
+        try:
+            values = (
+                await graph_gateway.get_state_values(
+                    GraphTarget(local_graph=agent, **dirs.metadata()), thread_id
+                )
+                or {}
+            )
+        except Exception:
+            logger.debug("rubric: thread state unavailable", exc_info=True)
+    session.acknowledge(thread_id, values.get("_rubric_applied"))
+    badges[thread_id] = rubric_badge(values, session.changes_for(thread_id))
