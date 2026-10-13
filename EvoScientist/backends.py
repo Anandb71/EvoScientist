@@ -451,6 +451,23 @@ def is_hitl_approve_all(config=None) -> bool:
     return configurable.get(HITL_APPROVE_ALL_KEY) is True
 
 
+def resume_declines(message: Any) -> bool:
+    """Whether *message* answers an approval with anything other than approve.
+
+    Sent with the session grant, such an answer is dropped and the batch runs as proposed.
+    """
+    resume = getattr(message, "resume", None)
+    if not isinstance(resume, dict):
+        return False
+    answers = [resume] if "decisions" in resume else list(resume.values())
+    for answer in answers:
+        decisions = answer.get("decisions") if isinstance(answer, dict) else None
+        for decision in decisions or ():
+            if not isinstance(decision, dict) or decision.get("type") != "approve":
+                return True
+    return False
+
+
 def approve_all_configurable_extra(active: bool) -> dict[str, Any] | None:
     """The ``configurable_extra`` part for a call that carries the session grant."""
     return {HITL_APPROVE_ALL_KEY: True} if active else None

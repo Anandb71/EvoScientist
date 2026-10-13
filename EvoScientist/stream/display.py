@@ -1572,6 +1572,7 @@ def _run_streaming(
     gateway: GraphGateway,
     runtime: AsyncRuntime | None = None,
     rubric: str | None = None,
+    approve_all_at_start: bool = False,
     _state: StreamState | None = None,
     _media_sent: set[str] | None = None,
     _sent_thinking_text: str | None = None,
@@ -1600,6 +1601,8 @@ def _run_streaming(
         metadata: Optional metadata dict forwarded to ``stream_agent_events``
             for LangGraph checkpoint persistence.
         gateway: Graph/thread gateway supplied by the active runtime.
+        approve_all_at_start: The channel this turn came from already holds an
+            "approve all" grant, so the turn's first call carries it.
 
     Returns:
         The final response text.
@@ -1627,6 +1630,7 @@ def _run_streaming(
                 gateway=gateway,
                 runtime=owned_runtime,
                 rubric=rubric,
+                approve_all_at_start=approve_all_at_start,
                 _state=_state,
                 _media_sent=_media_sent,
                 _sent_thinking_text=_sent_thinking_text,
@@ -1648,18 +1652,12 @@ def _run_streaming(
         state.response_text = final_text
         return final_text
 
-    from ..backends import HITL_APPROVE_ALL_KEY, approve_all_configurable_extra
+    from ..backends import approve_all_configurable_extra
     from ..rubric_session import merge_configurable_extra
 
-    # Which calls carry the session grant: see ``_hitl_when``. The caller's
-    # extras carry the key when the turn starts under a channel's grant; from
-    # there each call gets its own extras, built without it.
-    base_extra = {
-        key: value
-        for key, value in (configurable_extra or {}).items()
-        if key != HITL_APPROVE_ALL_KEY
-    }
-    turn_granted = (configurable_extra or {}).get(HITL_APPROVE_ALL_KEY) is True
+    # Which calls carry the session grant: see ``_hitl_when``. Decided where
+    # each answer is built, never from the flag at a round's top.
+    turn_granted = approve_all_at_start
     approve_all_carry = turn_granted or _session_auto_approve
 
     async def _consume() -> None:
@@ -1670,7 +1668,8 @@ def _run_streaming(
                 thread_id=thread_id,
                 metadata=metadata,
                 configurable_extra=merge_configurable_extra(
-                    base_extra, approve_all_configurable_extra(approve_all_carry)
+                    configurable_extra,
+                    approve_all_configurable_extra(approve_all_carry),
                 ),
                 target=_graph_target_for_local_agent(agent, metadata),
                 rubric=rubric,

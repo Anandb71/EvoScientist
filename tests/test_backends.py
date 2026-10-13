@@ -2221,6 +2221,57 @@ class TestIsHitlSuppressed:
         assert is_hitl_suppressed() is True
 
 
+_APPROVE_DECISION = {"type": "approve"}
+
+
+class TestResumeDeclines:
+    """Which answers must never travel with a session grant."""
+
+    @pytest.mark.parametrize(
+        "decision",
+        [
+            {"type": "reject"},
+            {"type": "edit", "edited_action": {"name": "execute", "args": {}}},
+            {"type": "respond", "message": "use another tool"},
+            {"type": "something new"},
+            {},
+            "approve",
+        ],
+    )
+    def test_any_decision_other_than_approve_declines(self, decision):
+        from langgraph.types import Command
+
+        from EvoScientist.backends import build_hitl_resume, resume_declines
+
+        assert resume_declines(build_hitl_resume("i1", [_APPROVE_DECISION, decision]))
+        assert resume_declines(Command(resume={"decisions": [decision]}))
+
+    def test_one_declined_interrupt_among_several_declines(self):
+        from langgraph.types import Command
+
+        from EvoScientist.backends import resume_declines
+
+        resume = {
+            "i1": {"decisions": [_APPROVE_DECISION]},
+            "i2": {"decisions": [_APPROVE_DECISION, {"type": "reject"}]},
+        }
+        assert resume_declines(Command(resume=resume))
+
+    def test_approvals_questions_and_messages_do_not_decline(self):
+        from langgraph.types import Command
+
+        from EvoScientist.backends import build_hitl_resume, resume_declines
+
+        assert not resume_declines(build_hitl_resume("i1", [_APPROVE_DECISION] * 2))
+        assert not resume_declines(Command(resume={"decisions": [_APPROVE_DECISION]}))
+        answered = {"i1": {"answers": ["yes"], "status": "answered"}}
+        assert not resume_declines(Command(resume=answered))
+        assert not resume_declines(Command(resume="continue"))
+        assert not resume_declines(Command(update={"messages": []}))
+        assert not resume_declines("a typed message")
+        assert not resume_declines(None)
+
+
 class TestIsHitlApproveAll:
     """The session's "approve all" grant read off configurable.hitl_approve_all."""
 
