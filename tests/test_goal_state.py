@@ -12,10 +12,10 @@ from EvoScientist.middleware.goal import (
     GoalTextError,
     check_goal_note,
     check_goal_text,
-    current_goal,
     merge_goal,
     new_goal_request,
 )
+from EvoScientist.rubric_session import thread_goal
 
 GOAL = {
     "objective": "ship it",
@@ -68,24 +68,24 @@ class TestMergeGoal:
         assert current == GOAL
 
 
-class TestCurrentGoal:
+class TestThreadGoal:
     def test_a_goal_whose_criteria_are_the_sticky_checklist_is_current(self):
         state = {
             "_goal": dict(GOAL),
             "_sticky_rubric": {"text": "- a", "id": "goal:r1"},
         }
-        assert current_goal(state) == GOAL
+        assert thread_goal(state) == GOAL
 
     @pytest.mark.parametrize(
         "sticky", [None, {"text": "- a", "id": "s1:3"}, {"text": "- a"}, "not a dict"]
     )
     def test_a_goal_without_its_checklist_is_no_goal(self, sticky):
-        assert current_goal({"_goal": dict(GOAL), "_sticky_rubric": sticky}) is None
+        assert thread_goal({"_goal": dict(GOAL), "_sticky_rubric": sticky}) is None
 
     @pytest.mark.parametrize("goal", [None, {}, {"status": "active"}, "not a dict"])
     def test_no_goal(self, goal):
         state = {"_goal": goal, "_sticky_rubric": {"text": "- a", "id": "goal:r1"}}
-        assert current_goal(state) is None
+        assert thread_goal(state) is None
 
 
 class TestLimits:

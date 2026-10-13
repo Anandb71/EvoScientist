@@ -66,6 +66,76 @@ def _text(ui) -> str:
     return "\n".join(_lines(ui))
 
 
+class TestWhatTheGoalReplaces:
+    """A goal's criteria take the checklist's place: the command says what goes."""
+
+    @pytest.mark.parametrize(
+        ("typed", "status", "when"),
+        [
+            ("ship it", None, "once the goal is accepted"),
+            ("amend add a title", "active", "once the goal is accepted"),
+            ("resume", "paused", "resuming the goal drops it"),
+        ],
+    )
+    async def test_a_waiting_rubric_change_is_named(
+        self, tmp_path, typed, status, when
+    ):
+        ctx, ui, runtime = _ctx(tmp_path, values=_thread(status) if status else {})
+        runtime.rubric.record("t", sticky="- mine")
+        assert await manager.execute(f"/goal {typed}", ctx)
+        assert ctx.goal_request is not None
+        (note,) = _lines(ui)
+        assert note.startswith("A /rubric change is waiting")
+        assert when in note
+
+    @pytest.mark.parametrize("typed", ["pause", "clear"])
+    async def test_pausing_or_clearing_names_no_waiting_change(self, tmp_path, typed):
+        """Neither is accepted like a goal, so nothing waiting is dropped."""
+        ctx, ui, runtime = _ctx(tmp_path, values=_thread("active"))
+        runtime.rubric.record("t", sticky="- mine")
+        assert await manager.execute(f"/goal {typed}", ctx)
+        assert ctx.goal_request["kind"] == typed
+        assert not [line for line in _lines(ui) if "/rubric" in line]
+
+    async def test_a_checklist_for_the_next_task_is_named(self, tmp_path):
+        values = {"_next_rubric": {"text": "- once", "id": "s:1"}}
+        ctx, ui, _ = _ctx(tmp_path, values=values)
+        assert await manager.execute("/goal ship it", ctx)
+        assert ctx.goal_request["kind"] == "create"
+        (note,) = _lines(ui)
+        assert "/rubric next" in note
+        assert "once the goal is accepted" in note
+
+    async def test_resuming_keeps_a_checklist_for_the_next_task(self, tmp_path):
+        values = _thread("paused", _next_rubric={"text": "- once", "id": "s:1"})
+        ctx, ui, _ = _ctx(tmp_path, values=values)
+        assert await manager.execute("/goal resume", ctx)
+        assert ctx.goal_request["kind"] == "resume"
+        assert _lines(ui) == []
+
+    async def test_a_change_the_thread_already_applied_is_not_waiting(self, tmp_path):
+        ctx, ui, runtime = _ctx(tmp_path)
+        operation = runtime.rubric.record("t", sticky="- mine")
+        ctx.graph_gateway = FakeGraphGateway(
+            state_values={
+                "_rubric_applied": {runtime.rubric.session_id: operation["seq"]}
+            }
+        )
+        assert await manager.execute("/goal ship it", ctx)
+        assert ctx.goal_request is not None
+        assert _lines(ui) == []
+
+    async def test_a_thread_that_cannot_be_read_still_gets_its_goal(self, tmp_path):
+        gateway = FakeGraphGateway(state_values={})
+        gateway.get_state_values = AsyncMock(side_effect=RuntimeError("store down"))
+        ctx, ui, runtime = _ctx(tmp_path, gateway=gateway)
+        runtime.rubric.record("t", sticky="- mine")
+        assert await manager.execute("/goal ship it", ctx)
+        assert ctx.goal_request["kind"] == "create"
+        (note,) = _lines(ui)
+        assert note.startswith("A /rubric change is waiting")
+
+
 class TestCreate:
     async def test_the_objective_is_everything_after_the_command(self, tmp_path):
         ctx, ui, _ = _ctx(tmp_path)

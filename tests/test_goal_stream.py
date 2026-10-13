@@ -33,6 +33,33 @@ class TestLines:
             ("  - it has a title", "dim"),
         ]
 
+    def test_a_goal_adopted_without_a_review_is_shown_as_a_warning(self):
+        event = {
+            "change": "accepted",
+            "objective": "ship it",
+            "criteria": CRITERIA,
+            "unreviewed": True,
+        }
+        assert goal_event_lines(event) == [
+            ("Goal accepted without review (auto mode).", "yellow"),
+            ("  - the report exists", "yellow"),
+            ("  - it has a title", "yellow"),
+        ]
+        amended = {**event, "change": "amended", "criteria": "- a"}
+        assert goal_event_lines(amended) == [
+            ("Goal amended without review (auto mode).", "yellow"),
+            ("  ship it", "yellow"),
+            ("  - a", "yellow"),
+        ]
+
+    def test_the_stream_event_carries_the_mark_only_when_set(self):
+        from EvoScientist.stream.emitter import StreamEventEmitter
+
+        plain = StreamEventEmitter.goal_state(change="accepted").data
+        assert "unreviewed" not in plain
+        marked = StreamEventEmitter.goal_state(change="accepted", unreviewed=True).data
+        assert marked["unreviewed"] is True
+
     def test_amended_also_shows_the_revised_objective(self):
         event = {"change": "amended", "objective": "ship it soon", "criteria": "- a"}
         assert goal_event_lines(event) == [
@@ -357,6 +384,9 @@ class TestEventsArriveWhileWorkGoesOn:
             await asyncio.wait_for(task, timeout=20)
         changes = [e["change"] for e in seen if e["type"] == "goal_state"]
         assert changes == ["drafting", "accepted", "complete"]
+        # Through the real decoder: only the adoption carries the mark.
+        marked = [e["change"] for e in seen if e.get("unreviewed")]
+        assert marked == ["accepted"]
 
     async def test_the_drafters_own_output_is_never_shown(self, tmp_path):
         """A streaming model: the draft's tokens and usage stay out of the turn."""

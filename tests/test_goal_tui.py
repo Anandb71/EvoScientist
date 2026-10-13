@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("textual")
 
+import EvoScientist.cli.tui_interactive as tui_mod
 from EvoScientist.cli.widgets.ask_user_widget import AskUserWidget
 from EvoScientist.cli.widgets.assistant_message import AssistantMessage
 from EvoScientist.cli.widgets.loading_widget import LoadingWidget
@@ -22,12 +23,12 @@ from EvoScientist.gateway import RuntimeGateways
 from EvoScientist.gateway.local import LocalGraphGateway
 from EvoScientist.paths import SessionDirs
 from tests.test_goal_real_graph import OBJECTIVE, _agent
-from tests.test_tui_banner_position import _capture_app
 from tests.test_tui_skill_pin import (
     _isolated_skills,  # noqa: F401  (autouse fixture)
     _NoHistory,
     _submit,
 )
+from tests.tui_fakes import capture_app as _capture_app
 
 
 def _wire(app, workspace, agent) -> None:
@@ -631,6 +632,14 @@ async def test_ctrl_c_during_the_command_starts_no_goal_run(
             return agent
 
         app._await_agent_ready = _held_ready
+        executed: list[str] = []
+        execute = tui_mod.cmd_manager.execute
+
+        async def _watched(command, ctx):
+            executed.append(command)
+            return await execute(command, ctx)
+
+        monkeypatch.setattr(tui_mod.cmd_manager, "execute", _watched)
         await _submit(app, f"/goal {OBJECTIVE}")
         await pilot.pause(0.2)
         assert app._busy is True
@@ -647,6 +656,8 @@ async def test_ctrl_c_during_the_command_starts_no_goal_run(
         await pilot.pause(0.3)
         assert app._run_task is None
         assert app._busy is False
+        # The load finished after the interrupt: the command's body never ran.
+        assert executed == []
         assert model.calls == {"main": 0, "draft": 0, "grade": 0}
         assert not list(app.query(AskUserWidget))
         assert not app.query_one("#prompt").disabled
@@ -891,6 +902,33 @@ async def test_ctrl_c_before_a_dispatched_turn_starts_frees_the_app(
             await pilot.pause()
             _fake_wire(app, workspace, steps.gateway)
             app._dispatch_input("hello")
+            app.action_request_quit()  # before the turn's task has run a step
+            await pilot.pause(0.3)
+            assert app._busy is False
+            assert app._run_task is None
+            assert steps.gateway.requests == []
+            await _submit(app, "again")
+            await _idle(app, pilot)
+            assert [request.message for request in steps.gateway.requests] == ["again"]
+    finally:
+        display_mod.discard_stream_cancel()
+
+
+async def test_ctrl_c_before_a_notifier_turn_starts_frees_the_app(
+    monkeypatch, workspace
+):
+    """A background-task notification starts its turn the way typed input does."""
+    from EvoScientist.stream import display as display_mod
+
+    steps = _StepGateway()
+    steps.gate("again").set()
+    app = await _capture_app(monkeypatch, workspace)
+    try:
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause()
+            _fake_wire(app, workspace, steps.gateway)
+            await app._inject_notification_tui("a background task finished", [])
+            assert app._busy is True
             app.action_request_quit()  # before the turn's task has run a step
             await pilot.pause(0.3)
             assert app._busy is False
@@ -1214,7 +1252,7 @@ async def test_a_command_cut_by_ctrl_c_leaves_an_open_approval_alone(
     from EvoScientist.channels import interaction as interaction_mod
     from EvoScientist.cli.widgets.approval_widget import ApprovalWidget
     from tests.fakes import FakeGraphGateway, FakeThreadStore
-    from tests.test_hitl_loop import _interrupt_event
+    from tests.fakes import interrupt_event as _interrupt_event
 
     # No config rule answers the approval: the widget is shown.
     monkeypatch.setattr(
