@@ -224,7 +224,7 @@ async def test_hook_updates_workspace_dir_on_resume():
 
     restored = SessionDirs(Workspace("/restored-ws"))
     sync_server.assert_awaited_once_with(
-        cfg, dirs=restored, backend=None, status_message=ANY
+        cfg, dirs=restored, backend=None, status_message=ANY, server_config=None
     )
     load_agent.assert_called_once_with(
         work_dir=str(restored.work_dir),
@@ -388,7 +388,7 @@ async def test_start_new_session_cb_returns_to_root_after_run_folder_resume():
 
     root = SessionDirs(workspace)
     sync_server.assert_awaited_once_with(
-        cfg, dirs=root, backend=None, status_message=ANY
+        cfg, dirs=root, backend=None, status_message=ANY, server_config=None
     )
     assert state.dirs == root
     assert state.thread_id == "new-tid"
@@ -432,7 +432,7 @@ async def test_serve_resume_callback_syncs_reloads_and_adopts_workspace():
 
     new_dirs = SessionDirs(Workspace("/new-ws"))
     sync_server.assert_awaited_once_with(
-        cfg, dirs=new_dirs, backend=None, status_message=ANY
+        cfg, dirs=new_dirs, backend=None, status_message=ANY, server_config=None
     )
     load_agent.assert_called_once_with(
         work_dir=str(Workspace("/new-ws").root),
@@ -478,6 +478,7 @@ async def test_serve_resume_forwards_resolved_backend_to_server_sync():
         dirs=SessionDirs(Workspace("/new-ws")),
         backend="langgraph_server",
         status_message=ANY,
+        server_config=None,
     )
 
 

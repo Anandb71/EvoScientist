@@ -230,7 +230,9 @@ def _run_prompt(
     monkeypatch.setattr(
         commands,
         "_ensure_async_subagent_server",
-        lambda _config, *, dirs, backend=None: captured["prespawned"].append(dirs),
+        lambda _config, *, dirs, backend=None, server_config=None: captured[
+            "prespawned"
+        ].append(dirs),
     )
     monkeypatch.setattr(commands, "_sync_background_agent_server_workspace", _fake_sync)
     monkeypatch.setattr(commands, "_load_agent", _fake_load_agent)
@@ -356,19 +358,22 @@ def test_webui_mode_run_works_in_root(monkeypatch, tmp_path):
     assert not (tmp_path / "runs").exists()
 
 
-def _run_tracking_server_config(monkeypatch, tmp_path, *, auto_mode):
+def _run_tracking_server_config(monkeypatch, tmp_path, *, auto_mode, auth_mode=None):
     """Drive the main callback and record each config load plus the server args."""
+    import EvoScientist.ccproxy_manager as ccproxy_mod
     import EvoScientist.cli.interactive as interactive_mod
     import EvoScientist.config as config_mod
 
     monkeypatch.chdir(tmp_path)
     base = _config()
     loads: list[dict] = []
-    captured: dict = {}
+    events: list[str] = []
+    captured: dict = {"events": events}
 
     def _fake_get_effective_config(cli_overrides=None):
         overrides = dict(cli_overrides or {})
         loads.append(overrides)
+        events.append("load_without_overrides" if not overrides else "load")
         merged = vars(base).copy()
         merged.update(overrides)
         return SimpleNamespace(**merged)
@@ -388,6 +393,9 @@ def _run_tracking_server_config(monkeypatch, tmp_path, *, auto_mode):
     monkeypatch.setattr(commands, "reload_env_dirs", lambda: None)
     monkeypatch.setattr(commands, "_ensure_async_subagent_server", _fake_ensure_server)
     monkeypatch.setattr(interactive_mod, "cmd_interactive", _fake_cmd_interactive)
+    monkeypatch.setattr(
+        ccproxy_mod, "maybe_start_ccproxy", lambda _cfg: events.append("ccproxy")
+    )
 
     commands._main_callback(
         SimpleNamespace(invoked_subcommand=None),
@@ -403,7 +411,7 @@ def _run_tracking_server_config(monkeypatch, tmp_path, *, auto_mode):
         auto_mode=auto_mode,
         ask_user=False,
         dangerous=False,
-        auth_mode=None,
+        auth_mode=auth_mode,
         ui=None,
         host=None,
         output_format=None,
@@ -425,6 +433,19 @@ def test_auto_mode_passes_the_config_the_server_loads(monkeypatch, tmp_path):
     assert captured["loads"][0]["auto_mode"] is True
     assert captured["loads"][-1] == {}
     assert captured["interactive_server_config"] is server_config
+
+
+def test_server_config_is_loaded_before_ccproxy_starts(monkeypatch, tmp_path):
+    """ccproxy force-sets the provider base URL / key in os.environ. A plain
+    session fingerprints the config loaded before it started, so the
+    no-override load must come first or OAuth sessions see false drift."""
+    captured = _run_tracking_server_config(
+        monkeypatch, tmp_path, auto_mode=True, auth_mode="oauth"
+    )
+
+    events = captured["events"]
+    assert "ccproxy" in events
+    assert events.index("load_without_overrides") < events.index("ccproxy")
 
 
 def test_no_cli_overrides_does_not_reload_config_for_the_server(monkeypatch, tmp_path):

@@ -12,6 +12,7 @@ Mirrors the lifecycle pattern used by ``ccproxy_manager.py``.
 from __future__ import annotations
 
 import atexit
+import dataclasses
 import hashlib
 import importlib.metadata
 import json
@@ -1451,14 +1452,18 @@ def _ensure_langgraph_dev_locked(
     """Locked critical section of ``ensure_langgraph_dev`` — must hold ``_LOCK``."""
     global _ASYNC_SUBAGENTS_AVAILABLE, CONFIG_DRIFT_SINCE_LAUNCH, AGENT_SHELL_DRIFT
     global SERVED_WORKSPACE
-    # CLI flags live only on ``config``. The subprocess loads the file and
-    # the environment (``server_config``), so fingerprinting the session
-    # config reports drift the server never had.
-    config_fp = _server_config_fingerprint(
-        config if server_config is None else server_config
-    )
     port = int(getattr(config, "langgraph_dev_port", _DEFAULT_PORT))
     host = str(getattr(config, "langgraph_dev_host", _DEFAULT_HOST) or _DEFAULT_HOST)
+    # CLI flags live only on ``config``. The subprocess loads the file and
+    # the environment (``server_config``), so fingerprinting the session
+    # config reports drift the server never had. Host and port are the
+    # exception: the child gets them from this call's env, not the snapshot.
+    loaded = config
+    if server_config is not None:
+        loaded = dataclasses.replace(
+            server_config, langgraph_dev_host=host, langgraph_dev_port=port
+        )
+    config_fp = _server_config_fingerprint(loaded)
     file_persistence = bool(getattr(config, "langgraph_dev_file_persistence", True))
     jobs_per_worker = int(getattr(config, "langgraph_dev_jobs_per_worker", 10))
 

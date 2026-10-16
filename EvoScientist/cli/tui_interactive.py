@@ -955,11 +955,7 @@ def run_textual_interactive(
                     current=self._dirs,
                     backend=gateway_backend,
                     new_run_dir=new_run_dir,
-                    **(
-                        {}
-                        if server_config is None
-                        else {"server_config": server_config}
-                    ),
+                    server_config=server_config,
                 )
             finally:
                 await sync_widget.cleanup()
@@ -3973,11 +3969,7 @@ def run_textual_interactive(
                                 target=stored,
                                 current=dirs,
                                 backend=gateway_backend,
-                                **(
-                                    {}
-                                    if server_config is None
-                                    else {"server_config": server_config}
-                                ),
+                                server_config=server_config,
                             ):
                                 resume_warning = (
                                     "Background agent server sync failed; "

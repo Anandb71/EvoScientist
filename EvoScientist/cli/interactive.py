@@ -336,7 +336,7 @@ async def _resolve_startup_session(
             graph_gateway=graph_gateway,
             config=config,
             backend=backend,
-            **({} if server_config is None else {"server_config": server_config}),
+            server_config=server_config,
         ),
         resumed=True,
     )
@@ -373,7 +373,7 @@ async def _new_session_dirs(
         backend=backend,
         new_run_dir=True,
         status_message="[dim]Moving background agent server to the new session...[/dim]",
-        **({} if server_config is None else {"server_config": server_config}),
+        server_config=server_config,
     ):
         console.print(
             "[yellow]Background agent server sync failed; started the new "
@@ -442,7 +442,7 @@ def cmd_interactive(
     async_runtime: "AsyncRuntime | None" = None,
     *,
     dirs: SessionDirs,
-    server_config=None,
+    server_config: Any | None = None,
 ) -> None:
     """Interactive conversation mode with streaming output.
 
@@ -905,11 +905,7 @@ def cmd_interactive(
                         target=dirs,
                         current=state["dirs"],
                         backend=gateway_backend,
-                        **(
-                            {}
-                            if server_config is None
-                            else {"server_config": server_config}
-                        ),
+                        server_config=server_config,
                     ):
                         console.print(
                             "[yellow]Background agent server sync failed; "

@@ -40,15 +40,18 @@ def _invoke_main(monkeypatch, argv):
 
     calls: dict[str, object] = {}
 
-    def _fake_config(overrides):
+    def _fake_config(overrides=None):
         cfg = EvoScientistConfig()
-        calls["overrides"] = dict(overrides or {})
+        # The no-override load for the server fingerprint must not clobber
+        # the session load's record.
+        if overrides or "overrides" not in calls:
+            calls["overrides"] = dict(overrides or {})
         # Apply every override the real merge would, so tests can assert on
         # flags (like --host) that reach the config rather than the callback.
         for key, value in (overrides or {}).items():
             setattr(cfg, key, value)
         # Mirror the real --ui override; default to webui for this test.
-        cfg.ui_backend = overrides.get("ui_backend") or "webui"
+        cfg.ui_backend = (overrides or {}).get("ui_backend") or "webui"
         return cfg
 
     def _fake_run_webui(config, **_kw):
@@ -134,7 +137,9 @@ def _run_ensure_backend(monkeypatch, config, *, server_up=True):
     printed: list[str] = []
     monkeypatch.setattr(
         "EvoScientist.langgraph_dev.manager.ensure_langgraph_dev",
-        lambda config, *, workspace_dir, run_dir=None, backend=None: None,
+        lambda config, *, workspace_dir, run_dir=None, backend=None, server_config=None: (
+            None
+        ),
     )
     monkeypatch.setattr(
         "EvoScientist.langgraph_dev.manager.is_async_subagents_available",
@@ -203,7 +208,9 @@ def test_background_agent_server_starts_even_when_async_subagents_disabled(
 
     calls = []
 
-    def fake_ensure(config, *, workspace_dir, run_dir=None, backend=None):
+    def fake_ensure(
+        config, *, workspace_dir, run_dir=None, backend=None, server_config=None
+    ):
         calls.append((config, workspace_dir, run_dir, backend))
 
     monkeypatch.setattr(
@@ -227,7 +234,9 @@ async def test_resume_workspace_sync_runs_even_when_async_subagents_disabled(
 
     calls = []
 
-    def fake_ensure(config, *, workspace_dir, run_dir=None, backend=None):
+    def fake_ensure(
+        config, *, workspace_dir, run_dir=None, backend=None, server_config=None
+    ):
         calls.append((config, workspace_dir, run_dir, backend))
 
     monkeypatch.setattr(

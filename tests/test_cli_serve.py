@@ -131,6 +131,7 @@ def _run_serve_once(
     def _fake_get_effective_config(cli_overrides=None):
         overrides = dict(cli_overrides or {})
         captured.setdefault("config_loads", []).append(overrides)
+        order.append(("load", "overrides" if overrides else None))
         # The session load carries the flags. A later no-override load, used
         # only for the server fingerprint, must not clobber that record.
         if overrides or "cli_overrides" not in captured:
@@ -141,6 +142,13 @@ def _run_serve_once(
 
     monkeypatch.setattr(config_mod, "get_effective_config", _fake_get_effective_config)
     monkeypatch.setattr(config_mod, "apply_config_to_env", lambda _cfg: None)
+    import EvoScientist.ccproxy_manager as ccproxy_mod
+
+    monkeypatch.setattr(
+        ccproxy_mod,
+        "maybe_start_ccproxy",
+        lambda _cfg: order.append(("ccproxy", None)),
+    )
 
     if cwd is not None:
         monkeypatch.setattr(commands.os, "getcwd", lambda: cwd)
@@ -449,3 +457,14 @@ def test_serve_auto_mode_passes_the_config_the_server_loads(monkeypatch, tmp_pat
     assert server_config.auto_mode is False
     assert captured["config_loads"][-1] == {}
     assert captured["cli_overrides"]["auto_mode"] is True
+
+
+def test_serve_loads_server_config_before_ccproxy_starts(monkeypatch, tmp_path):
+    """ccproxy rewrites the provider env; the no-override load must precede it."""
+    ws = str((tmp_path / "ws").resolve())
+    cfg = _make_config(default_workdir=ws)
+    cfg.anthropic_auth_mode = "oauth"
+    order, _ = _run_serve_once(monkeypatch, cfg, workdir=ws, auto_mode=True)
+
+    assert ("ccproxy", None) in order
+    assert order.index(("load", None)) < order.index(("ccproxy", None))

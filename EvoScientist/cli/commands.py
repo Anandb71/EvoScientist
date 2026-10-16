@@ -651,14 +651,13 @@ def _ensure_async_subagent_server(
             "[dim]Starting background agent server (langgraph dev)...[/dim]",
             spinner="dots",
         ):
-            ensure_kwargs: dict[str, Any] = {
-                "workspace_dir": dirs.workspace.root,
-                "run_dir": dirs.run_dir,
-                "backend": backend,
-            }
-            if server_config is not None:
-                ensure_kwargs["server_config"] = server_config
-            ensure_langgraph_dev(config, **ensure_kwargs)
+            ensure_langgraph_dev(
+                config,
+                workspace_dir=dirs.workspace.root,
+                run_dir=dirs.run_dir,
+                backend=backend,
+                server_config=server_config,
+            )
             _reconcile_autoskill_schedule(config, workspace=dirs.workspace)
             _adopt_stale_scheduled_tasks(workspace=dirs.workspace)
     except WorkspaceMismatchError as exc:
@@ -883,14 +882,14 @@ async def _sync_background_agent_server_workspace(
             await asyncio.to_thread(
                 _wait_for_memory_workers, timeout_action="moving the server anyway"
             )
-        ensure_kwargs: dict[str, Any] = {
-            "workspace_dir": dirs.workspace.root,
-            "run_dir": dirs.run_dir,
-            "backend": backend,
-        }
-        if server_config is not None:
-            ensure_kwargs["server_config"] = server_config
-        await asyncio.to_thread(ensure_langgraph_dev, config, **ensure_kwargs)
+        await asyncio.to_thread(
+            ensure_langgraph_dev,
+            config,
+            workspace_dir=dirs.workspace.root,
+            run_dir=dirs.run_dir,
+            backend=backend,
+            server_config=server_config,
+        )
         await asyncio.to_thread(
             _reconcile_autoskill_schedule,
             config,
@@ -929,14 +928,13 @@ async def _move_server_or_keep_session(
     from ..langgraph_dev.manager import WorkspaceMismatchError
 
     try:
-        sync_kwargs: dict[str, Any] = {
-            "dirs": target,
-            "backend": backend,
-            "status_message": status_message,
-        }
-        if server_config is not None:
-            sync_kwargs["server_config"] = server_config
-        await _sync_background_agent_server_workspace(config, **sync_kwargs)
+        await _sync_background_agent_server_workspace(
+            config,
+            dirs=target,
+            backend=backend,
+            status_message=status_message,
+            server_config=server_config,
+        )
     except WorkspaceMismatchError:
         if new_run_dir:
             _remove_unused_run_dir(target.run_dir)
@@ -978,14 +976,13 @@ async def _restore_thread_dirs(
         or dirs
     )
     try:
-        move_kwargs: dict[str, Any] = {
-            "target": restored,
-            "current": served,
-            "backend": backend,
-        }
-        if server_config is not None:
-            move_kwargs["server_config"] = server_config
-        synced = await _move_server_or_keep_session(config, **move_kwargs)
+        synced = await _move_server_or_keep_session(
+            config,
+            target=restored,
+            current=served,
+            backend=backend,
+            server_config=server_config,
+        )
     except WorkspaceMismatchError as exc:
         _remove_unused_run_dir(dirs.run_dir)
         console.print(f"[red]{exc}[/red]")
@@ -1436,14 +1433,13 @@ async def _apply_serve_resume_state(
             config=effective_config,
             runtime=runtime_state.async_runtime,
         )
-        move_kwargs: dict[str, Any] = {
-            "target": new_dirs,
-            "current": runtime_state.dirs,
-            "backend": runtime_state.gateway_backend,
-        }
-        if runtime_state.server_config is not None:
-            move_kwargs["server_config"] = runtime_state.server_config
-        if not await _move_server_or_keep_session(effective_config, **move_kwargs):
+        if not await _move_server_or_keep_session(
+            effective_config,
+            target=new_dirs,
+            current=runtime_state.dirs,
+            backend=runtime_state.gateway_backend,
+            server_config=runtime_state.server_config,
+        ):
             console.print(
                 "[yellow]Background agent server sync failed; async "
                 "subagents and EvoMemory workers may be unavailable.[/yellow]"
@@ -1908,6 +1904,12 @@ def serve(
     if debug:
         _configure_logging()
 
+    # Snapshot what the background server will load before ccproxy runs:
+    # ccproxy force-sets the provider base URL / key in os.environ, while a
+    # plain session fingerprints the config loaded before it started.
+    # CLI-only flags are not part of this load.
+    server_config = _config_loaded_by_server(cli_overrides)
+
     # Auto-start ccproxy if any provider uses OAuth mode
     _ccproxy_proc_serve = None
     if config.anthropic_auth_mode == "oauth" or config.openai_auth_mode == "oauth":
@@ -1941,13 +1943,9 @@ def serve(
 
     # Auto-start langgraph dev (after workspace resolution, so deployed
     # async sub-agents inherit the CLI's workspace via EVOSCIENTIST_WORKSPACE_DIR).
-    # Snapshot after apply_config_to_env / ccproxy: the child inherits that
-    # environment, and CLI-only flags are not in it.
-    server_config = _config_loaded_by_server(cli_overrides)
-    ensure_call: dict[str, Any] = {"dirs": dirs, "backend": gateway_backend}
-    if server_config is not None:
-        ensure_call["server_config"] = server_config
-    _ensure_async_subagent_server(config, **ensure_call)
+    _ensure_async_subagent_server(
+        config, dirs=dirs, backend=gateway_backend, server_config=server_config
+    )
 
     if config.dangerous_mode:
         from ._constants import DANGEROUS_BANNER_LABEL, DANGEROUS_BANNER_MESSAGE
@@ -2764,6 +2762,12 @@ def _main_callback(
     config = get_effective_config(cli_overrides)
     apply_config_to_env(config)
 
+    # Snapshot what the background server will load before ccproxy runs:
+    # ccproxy force-sets the provider base URL / key in os.environ, while a
+    # plain session fingerprints the config loaded before it started.
+    # CLI-only flags are not part of this load.
+    server_config = _config_loaded_by_server(cli_overrides)
+
     # Auto-start ccproxy if any provider uses OAuth mode
     _ccproxy_proc = None
     if config.anthropic_auth_mode == "oauth" or config.openai_auth_mode == "oauth":
@@ -2879,15 +2883,11 @@ def _main_callback(
     # async sub-agents inherit the CLI's workspace via EVOSCIENTIST_WORKSPACE_DIR).
     # A one-shot resume starts it for the thread's own folders instead, unless
     # the server gateway backend needs a running server to be built.
-    # Snapshot after apply_config_to_env / ccproxy: the child inherits that
-    # environment, and CLI-only flags are not in it.
-    server_config = _config_loaded_by_server(cli_overrides)
     prespawn = not (prompt and thread_id) or gateway_backend == "langgraph_server"
     if prespawn:
-        ensure_call: dict[str, Any] = {"dirs": dirs, "backend": gateway_backend}
-        if server_config is not None:
-            ensure_call["server_config"] = server_config
-        _ensure_async_subagent_server(config, **ensure_call)
+        _ensure_async_subagent_server(
+            config, dirs=dirs, backend=gateway_backend, server_config=server_config
+        )
 
     if prompt:
         # Single-shot mode: wrap in persistent checkpointer
@@ -2912,16 +2912,15 @@ def _main_callback(
                     resolution = await graph_gateway.resolve_thread(thread_id)
                     if resolution.thread_id:
                         tid = resolution.thread_id
-                        restore_kwargs: dict[str, Any] = {
-                            "dirs": dirs,
-                            "served": dirs if prespawn else None,
-                            "graph_gateway": graph_gateway,
-                            "config": config,
-                            "backend": gateway_backend,
-                        }
-                        if server_config is not None:
-                            restore_kwargs["server_config"] = server_config
-                        session_dirs = await _restore_thread_dirs(tid, **restore_kwargs)
+                        session_dirs = await _restore_thread_dirs(
+                            tid,
+                            dirs=dirs,
+                            served=dirs if prespawn else None,
+                            graph_gateway=graph_gateway,
+                            config=config,
+                            backend=gateway_backend,
+                            server_config=server_config,
+                        )
                     elif resolution.matches:
                         console.print(
                             f"[yellow]Ambiguous thread ID '{escape(thread_id)}'. Matches:[/yellow]"
@@ -3018,22 +3017,20 @@ def _main_callback(
         from .interactive import cmd_interactive
 
         # Interactive mode (default) — checkpointer managed inside cmd_interactive
-        interactive_kwargs: dict[str, Any] = {
-            "show_thinking": show_thinking,
-            "channel_send_thinking": effective_channel_thinking,
-            "dirs": dirs,
-            "mode": effective_mode,
-            "model": config.model,
-            "provider": config.provider,
-            "run_name": name,
-            "thread_id": thread_id,
-            "ui_backend": config.ui_backend,
-            "config": config,
-            "async_runtime": async_runtime,
-        }
-        if server_config is not None:
-            interactive_kwargs["server_config"] = server_config
-        cmd_interactive(**interactive_kwargs)
+        cmd_interactive(
+            show_thinking=show_thinking,
+            channel_send_thinking=effective_channel_thinking,
+            dirs=dirs,
+            mode=effective_mode,
+            model=config.model,
+            provider=config.provider,
+            run_name=name,
+            thread_id=thread_id,
+            ui_backend=config.ui_backend,
+            config=config,
+            async_runtime=async_runtime,
+            server_config=server_config,
+        )
 
 
 def _configure_logging():
